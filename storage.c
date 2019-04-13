@@ -72,27 +72,31 @@ storage_read(const char* path, char* buf, size_t size, off_t offset)
 		return -EINVAL;
 	if(offset > node->size)
 		return 0;
+
+	int* page_index;
 	if(node->size > INODE_MAX_DIRECT_BLOCKS * PAGE_SIZE)
-	{
-		// indirect
-	}
+		page_index = (int*)pages_get_page(node->iptr);
 	else
+		page_index = node->blocks;
+	
+	int remaining_actual_size = node->size - offset;
+	size_t remaining_desired_size = size;
+	page_index += offset / PAGE_SIZE;
+	offset = offset % PAGE_SIZE;
+
+	int to_read;
+	while(remaining_desired_size > 0 && remaining_actual_size > 0)
 	{
-		size_t remaining_desired_size = size;
-		int remaining_actual_size = node->size;
-		int block = 0;
-		int to_read;
-		while(remaining_desired_size > 0 && remaining_actual_size > 0)
-		{
-			to_read = min(remaining_desired_size, min(remaining_actual_size, PAGE_SIZE - offset));
-			memcpy(buf, pages_get_page(node->blocks[block]) + offset, to_read);
-			++block;
-			offset = 0;
-			remaining_desired_size -= to_read;
-			remaining_actual_size -= to_read;
-		}
-		return (int)(size - remaining_desired_size);
+		to_read = min(remaining_desired_size, min(remaining_actual_size, PAGE_SIZE - offset));
+		memcpy(buf, pages_get_page(*page_index) + offset, to_read);
+		++page_index;
+		offset = 0;
+		remaining_desired_size -= to_read;
+		remaining_actual_size -= to_read;
+		buf += to_read;
 	}
+	
+	return (int)(size - remaining_desired_size);
 }
 
 int
@@ -112,25 +116,27 @@ storage_write(const char* path, const char* buf, size_t size, off_t offset)
 		node = get_inode(inum);
 	}
 
+	int* page_index;
 	if(node->size > INODE_MAX_DIRECT_BLOCKS * PAGE_SIZE)
-	{
-		// indirect
-	}
+		page_index = (int*)pages_get_page(node->iptr);
 	else
+		page_index = node->blocks;
+
+	size_t remaining_size = size;
+	page_index += offset / PAGE_SIZE;
+	offset = offset % PAGE_SIZE;
+
+	int to_write;
+	while(remaining_size > 0)
 	{
-		size_t remaining_size = size;
-		int block = offset / PAGE_SIZE;
-		int to_write;
-		while(remaining_size > 0)
-		{
-			to_write = min(remaining_size, PAGE_SIZE - (offset % PAGE_SIZE));
-			memcpy(pages_get_page(node->blocks[block]) + offset, buf, to_write);
-			++block;
-			offset = 0;
-			remaining_size -= to_write;
-		}
-		return size;
+		to_write = min(remaining_size, PAGE_SIZE - offset);
+		memcpy(pages_get_page(*page_index) + offset, buf, to_write);
+		++page_index;
+		offset = 0;
+		remaining_size -= to_write;
+		buf += to_write;
 	}
+	return size;
 }
 
 int
@@ -161,7 +167,7 @@ storage_truncate(const char *path, off_t size)
 		}
 		else if(new_page_count > INODE_MAX_DIRECT_BLOCKS && old_page_count > new_page_count)
 		{
-			int* pnum = pages_get_page(node->iptr);
+			int* pnum = (int*)pages_get_page(node->iptr) + new_page_count;
 			for(int i = new_page_count; i < old_page_count; ++i, ++pnum)
 				free_page(*pnum);
 		}
@@ -181,7 +187,7 @@ storage_truncate(const char *path, off_t size)
 		}
 		else if(old_page_count < new_page_count && old_page_count > INODE_MAX_DIRECT_BLOCKS)
 		{
-			int* pnum = pages_get_page(node->iptr);
+			int* pnum = (int*)pages_get_page(node->iptr) + old_page_count;
 			for(int i = old_page_count; i < new_page_count; ++i, ++pnum)
 				*pnum = alloc_page();
 		}

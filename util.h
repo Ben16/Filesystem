@@ -56,7 +56,7 @@ join_to_path(char* buf, char* item)
 static int
 bits_to_bytes(int bits)
 {
-	return bits * 8 + ((bits % 8) ? 1 : 0);
+	return bits / 8 + ((bits % 8) ? 1 : 0);
 }
 
 #endif
